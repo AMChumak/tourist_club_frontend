@@ -10,8 +10,6 @@ interface PersonsList {
     persons: PersonShort[];
 }
 
-
-
 interface PersonShort {
     id: number;
     name: string;
@@ -32,6 +30,7 @@ interface Group {
 
 type PageType = 'persons' | 'groups';
 
+// Основной компонент
 const App: React.FC = () => {
     const [currentPage, setCurrentPage] = useState<PageType>('persons');
     const [searchTerm, setSearchTerm] = useState('');
@@ -40,27 +39,26 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Загрузка списка персон при монтировании
+    // Эффекты и загрузка данных
     useEffect(() => {
-        const fetchPersons = async () => {
-            try {
-                setIsLoading(true);
-                const response = await axios.get<PersonsList>('http://localhost:8080/tourists/filter');
-                setPersons(response.data.persons);
-            } catch (err) {
-                setError('Не удалось загрузить список персон');
-                console.error('Ошибка загрузки:', err);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
         if (currentPage === 'persons') {
             fetchPersons();
         }
     }, [currentPage]);
 
-    // Загрузка деталей персоны
+    const fetchPersons = async () => {
+        try {
+            setIsLoading(true);
+            const response = await axios.get<PersonsList>('http://localhost:8080/tourists/filter');
+            setPersons(response.data.persons);
+        } catch (err) {
+            setError('Не удалось загрузить список персон');
+            console.error('Ошибка загрузки:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const fetchPersonDetails = async (personId: number) => {
         try {
             setIsLoading(true);
@@ -75,7 +73,7 @@ const App: React.FC = () => {
         }
     };
 
-    // Обработчики
+    // Обработчики событий
     const handleNavItemClick = (page: PageType) => {
         setCurrentPage(page);
         setSelectedPerson(null);
@@ -87,135 +85,220 @@ const App: React.FC = () => {
     };
 
     const handlePersonSelect = (person: PersonShort) => {
-        setSelectedPerson(null); // Сбрасываем перед загрузкой новых данных
+        setSelectedPerson(null);
         fetchPersonDetails(person.id);
     };
 
-    // Фильтрация персон
-    const filteredPersons = persons.filter(person => {
-        const fullName = `${person.surname} ${person.name} ${person.patronymic}`.toLowerCase();
-        return fullName.includes(searchTerm.toLowerCase());
-    });
-
-    // Форматирование ФИО
+    // Вспомогательные функции
     const formatFullName = (person: PersonShort) => {
         return `${person.surname} ${person.name} ${person.patronymic}`;
     };
 
+    const filteredPersons = persons.filter(person => {
+        const fullName = formatFullName(person).toLowerCase();
+        return fullName.includes(searchTerm.toLowerCase());
+    });
+
     return (
         <div style={appStyle}>
-            {/* Левая панель - навигация */}
-            <div style={navPanelStyle}>
-                <h3 style={{ marginTop: 0 }}>Навигация</h3>
-                <ul style={navListStyle}>
-                    {[
-                        { id: 'persons', label: 'Персоны' },
-                        { id: 'groups', label: 'Группы' },
-                    ].map((item) => (
-                        <li
-                            key={item.id}
-                            onClick={() => handleNavItemClick(item.id as PageType)}
-                            style={{
-                                ...navItemStyle,
-                                backgroundColor: currentPage === item.id ? '#e0e0e0' : 'transparent',
-                                fontWeight: currentPage === item.id ? 'bold' : 'normal'
-                            }}
-                        >
-                            {item.label}
-                        </li>
-                    ))}
-                </ul>
-            </div>
+            <NavigationPanel
+                currentPage={currentPage}
+                onNavItemClick={handleNavItemClick}
+            />
 
-            {/* Центральная панель - контент */}
-            <div style={contentPanelStyle}>
-                <h2 style={{ margin: 0 }}>
-                    {currentPage === 'persons' ? 'Персоны' : 'Группы'}
-                </h2>
+            <ContentPanel
+                currentPage={currentPage}
+                isLoading={isLoading}
+                error={error}
+                persons={persons}
+                filteredPersons={filteredPersons}
+                selectedPerson={selectedPerson}
+                searchTerm={searchTerm}
+                onSearchChange={handleSearchChange}
+                onPersonSelect={handlePersonSelect}
+                formatFullName={formatFullName}
+            />
 
-                {currentPage === 'persons' ? (
-                    <>
-                        {/* Поиск для персон */}
-                        <div style={searchPanelStyle}>
-                            <input
-                                type="text"
-                                placeholder="Поиск по ФИО..."
-                                value={searchTerm}
-                                onChange={handleSearchChange}
-                                style={searchInputStyle}
-                            />
-                        </div>
-
-                        {/* Список персон */}
-                        <div style={listContainerStyle}>
-                            {isLoading && persons.length === 0 ? (
-                                <div style={messageStyle}>Загрузка...</div>
-                            ) : error ? (
-                                <div style={{ ...messageStyle, color: 'red' }}>{error}</div>
-                            ) : filteredPersons.length > 0 ? (
-                                filteredPersons.map(person => (
-                                    <button
-                                        key={person.id}
-                                        onClick={() => handlePersonSelect(person)}
-                                        style={{
-                                            ...listItemStyle,
-                                            backgroundColor: selectedPerson?.id === person.id ? '#e0e0e0' : 'white',
-                                        }}
-                                    >
-                                        {formatFullName(person)}
-                                    </button>
-                                ))
-                            ) : (
-                                <div style={messageStyle}>Ничего не найдено</div>
-                            )}
-                        </div>
-                    </>
-                ) : (
-                    <div style={messageStyle}>Раздел групп в разработке</div>
-                )}
-            </div>
-
-            {/* Правая панель - детали */}
-            <div style={detailsPanelStyle}>
-                {selectedPerson ? (
-                    <>
-                        <h2 style={{ marginTop: 0 }}>
-                            {formatFullName(selectedPerson)}
-                        </h2>
-
-                        {isLoading ? (
-                            <div style={messageStyle}>Загрузка деталей...</div>
-                        ) : error ? (
-                            <div style={{ ...messageStyle, color: 'red' }}>{error}</div>
-                        ) : (
-                            <div style={propertiesContainerStyle}>
-                                {/* Статические поля */}
-                                <div style={propertyRowStyle}>
-                                    <span style={propertyLabelStyle}>ID:</span>
-                                    <span>{selectedPerson.id}</span>
-                                </div>
-
-                                {/* Динамические свойства */}
-                                {Object.entries(selectedPerson.properties).map(([key, value]) => (
-                                    <div key={key} style={propertyRowStyle}>
-                                        <span style={propertyLabelStyle}>{key}:</span>
-                                        <span>{value}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </>
-                ) : (
-                    <div style={messageStyle}>
-                        {currentPage === 'persons'
-                            ? 'Выберите персону для просмотра деталей'
-                            : 'Выберите группу для просмотра деталей'}
-                    </div>
-                )}
-            </div>
+            <DetailsPanel
+                currentPage={currentPage}
+                selectedPerson={selectedPerson}
+                isLoading={isLoading}
+                error={error}
+                formatFullName={formatFullName}
+            />
         </div>
     );
 };
+
+// Компонент левой панели навигации
+const NavigationPanel: React.FC<{
+    currentPage: PageType;
+    onNavItemClick: (page: PageType) => void;
+}> = ({ currentPage, onNavItemClick }) => {
+    const navItems = [
+        { id: 'persons', label: 'Персоны' },
+        { id: 'groups', label: 'Группы' },
+    ];
+
+    return (
+        <div style={navPanelStyle}>
+            <h3 style={{ marginTop: 0 }}>Навигация</h3>
+            <ul style={navListStyle}>
+                {navItems.map((item) => (
+                    <li
+                        key={item.id}
+                        onClick={() => onNavItemClick(item.id as PageType)}
+                        style={{
+                            ...navItemStyle,
+                            backgroundColor: currentPage === item.id ? '#e0e0e0' : 'transparent',
+                            fontWeight: currentPage === item.id ? 'bold' : 'normal'
+                        }}
+                    >
+                        {item.label}
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+};
+
+// Компонент центральной панели
+const ContentPanel: React.FC<{
+    currentPage: PageType;
+    isLoading: boolean;
+    error: string | null;
+    persons: PersonShort[];
+    filteredPersons: PersonShort[];
+    selectedPerson: PersonDetails | null;
+    searchTerm: string;
+    onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onPersonSelect: (person: PersonShort) => void;
+    formatFullName: (person: PersonShort) => string;
+}> = ({
+          currentPage,
+          isLoading,
+          error,
+          persons,
+          filteredPersons,
+          selectedPerson,
+          searchTerm,
+          onSearchChange,
+          onPersonSelect,
+          formatFullName
+      }) => {
+    const renderPersonsList = () => {
+        if (isLoading && persons.length === 0) {
+            return <div style={messageStyle}>Загрузка...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        if (filteredPersons.length === 0) {
+            return <div style={messageStyle}>Ничего не найдено</div>;
+        }
+
+        return filteredPersons.map(person => (
+            <button
+                key={person.id}
+                onClick={() => onPersonSelect(person)}
+                style={{
+                    ...listItemStyle,
+                    backgroundColor: selectedPerson?.id === person.id ? '#e0e0e0' : 'white',
+                }}
+            >
+                {formatFullName(person)}
+            </button>
+        ));
+    };
+
+    return (
+        <div style={contentPanelStyle}>
+            <h2 style={{ margin: 0 }}>
+                {currentPage === 'persons' ? 'Персоны' : 'Группы'}
+            </h2>
+
+            {currentPage === 'persons' ? (
+                <>
+                    <div style={searchPanelStyle}>
+                        <input
+                            type="text"
+                            placeholder="Поиск по ФИО..."
+                            value={searchTerm}
+                            onChange={onSearchChange}
+                            style={searchInputStyle}
+                        />
+                    </div>
+
+                    <div style={listContainerStyle}>
+                        {renderPersonsList()}
+                    </div>
+                </>
+            ) : (
+                <div style={messageStyle}>Раздел групп в разработке</div>
+            )}
+        </div>
+    );
+};
+
+// Компонент правой панели с деталями
+const DetailsPanel: React.FC<{
+    currentPage: PageType;
+    selectedPerson: PersonDetails | null;
+    isLoading: boolean;
+    error: string | null;
+    formatFullName: (person: PersonShort) => string;
+}> = ({ currentPage, selectedPerson, isLoading, error, formatFullName }) => {
+    const renderPersonDetails = () => {
+        if (!selectedPerson) {
+            return (
+                <div style={messageStyle}>
+                    {currentPage === 'persons'
+                        ? 'Выберите персону для просмотра деталей'
+                        : 'Выберите группу для просмотра деталей'}
+                </div>
+            );
+        }
+
+        if (isLoading) {
+            return <div style={messageStyle}>Загрузка деталей...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        return (
+            <>
+                <h2 style={{ marginTop: 0 }}>
+                    {formatFullName(selectedPerson)}
+                </h2>
+
+                <div style={propertiesContainerStyle}>
+                    <div style={propertyRowStyle}>
+                        <span style={propertyLabelStyle}>ID:</span>
+                        <span>{selectedPerson.id}</span>
+                    </div>
+
+                    {Object.entries(selectedPerson.properties).map(([key, value]) => (
+                        <div key={key} style={propertyRowStyle}>
+                            <span style={propertyLabelStyle}>{key}:</span>
+                            <span>{value}</span>
+                        </div>
+                    ))}
+                </div>
+            </>
+        );
+    };
+
+    return (
+        <div style={detailsPanelStyle}>
+            {renderPersonDetails()}
+        </div>
+    );
+};
+
 
 const appStyle: CSSProperties = {
     display: 'flex',
