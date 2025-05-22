@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CSSProperties } from 'react';
 import axios from 'axios';
 
+
 // Типы данных
 
 interface PersonsList {
@@ -21,12 +22,7 @@ interface PersonDetails extends PersonShort {
     properties: Record<string, string>;
 }
 
-interface Group {
-    id: number;
-    name: string;
-    members: number;
-    // ... другие поля группы
-}
+
 
 type PageType = 'persons' | 'groups';
 
@@ -39,12 +35,77 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Эффекты и загрузка данных
+    /*// Эффекты и загрузка данных
     useEffect(() => {
         if (currentPage === 'persons') {
             fetchPersons();
         }
-    }, [currentPage]);
+    }, [currentPage]);*/
+
+    const onSearch = async (filters: {
+        searchTerm: string;
+        role: string;
+        section?: string;
+        group?: string;
+        gender?: string;
+        age?: string;
+        birthYear?: string;
+        additional?: Record<string, string>;
+    }) => {
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            // Определяем endpoint в зависимости от роли
+            let endpoint = '';
+            switch (filters.role) {
+                case '0':
+                    endpoint = '/tourists/filter';
+                    break;
+                case '1':
+                    endpoint = '/trainers/filter';
+                    break;
+                case '2':
+                    endpoint = '/managers/filter';
+                    break;
+                default:
+                    throw new Error('Не выбрана роль');
+            }
+
+            // Формируем query параметры
+            const params = new URLSearchParams();
+
+            // Основные параметры
+            if (filters.section) params.append('section', filters.section);
+            if (filters.group) params.append('group', filters.group);
+            if (filters.gender) params.append('sex', filters.gender);
+            if (filters.age) params.append('age', filters.age);
+            if (filters.birthYear) params.append('birth_year', filters.birthYear);
+
+            // Дополнительные параметры в зависимости от роли
+            if (filters.additional) {
+                Object.entries(filters.additional).forEach(([key, value]) => {
+                    if (value) params.append(key, value);
+                });
+            }
+
+            // Отправляем запрос
+            const response = await axios.get<PersonsList>(`http://localhost:8080${endpoint}?${params.toString()}`);
+
+            // Обрабатываем ответ
+            if (!Array.isArray(response.data.persons)) {
+                throw new Error('Некорректный формат данных');
+            }
+
+            setPersons(response.data.persons);
+        } catch (err) {
+            setError('Ошибка при выполнении поиска');
+            console.error('Ошибка поиска:', err);
+            setPersons([]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const fetchPersons = async () => {
         try {
@@ -107,13 +168,13 @@ const App: React.FC = () => {
             />
 
             <ContentPanel
-                currentPage={currentPage}
                 isLoading={isLoading}
                 error={error}
                 persons={persons}
                 filteredPersons={filteredPersons}
                 selectedPerson={selectedPerson}
                 searchTerm={searchTerm}
+                onSearch={onSearch}
                 onSearchChange={handleSearchChange}
                 onPersonSelect={handlePersonSelect}
                 formatFullName={formatFullName}
@@ -162,9 +223,34 @@ const NavigationPanel: React.FC<{
     );
 };
 
+
+
+
+type PersonRole = {
+    id: number
+    role: string
+}
+
+type Section = {
+    id: number
+    title: string
+}
+
+type Group = {
+    id: number
+    group_number: number
+    section: number
+}
+
+
 // Компонент центральной панели
+interface FilterOptions {
+    roles: PersonRole[];
+    sections: Section[];
+    groups: Group[];
+}
+
 const ContentPanel: React.FC<{
-    currentPage: PageType;
     isLoading: boolean;
     error: string | null;
     persons: PersonShort[];
@@ -174,8 +260,8 @@ const ContentPanel: React.FC<{
     onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onPersonSelect: (person: PersonShort) => void;
     formatFullName: (person: PersonShort) => string;
+    onSearch: (filters: any) => void;
 }> = ({
-          currentPage,
           isLoading,
           error,
           persons,
@@ -184,8 +270,195 @@ const ContentPanel: React.FC<{
           searchTerm,
           onSearchChange,
           onPersonSelect,
-          formatFullName
+          formatFullName,
+          onSearch
       }) => {
+    const [filterOptions, setFilterOptions] = useState<FilterOptions>({
+        roles: [],
+        sections: [],
+        groups: []
+    });
+    const [filters, setFilters] = useState({
+        role: '0',
+        section: '',
+        group: '',
+        gender: '',
+        age: '',
+        birthYear: '',
+        additional: {} as Record<string, string>
+    });
+    const [isFiltersExpanded, setIsFiltersExpanded] = useState(false);
+    const [isLoadingFilters, setIsLoadingFilters] = useState(false);
+
+    // Загрузка опций фильтров
+    const loadFilterOptions = async () => {
+        try {
+            setIsLoadingFilters(true);
+            const [rolesRes, sectionsRes, groupsRes] = await Promise.all([
+                axios.get<PersonRole[]>('http://localhost:8080/roles/list'),
+                axios.get<Section[]>('http://localhost:8080/sections/list'),
+                axios.get<Group[]>('http://localhost:8080/groups/list')
+            ]);
+
+            setFilterOptions({
+                roles: rolesRes.data,
+                sections: sectionsRes.data,
+                groups: groupsRes.data,
+            });
+
+        } catch (err) {
+            console.error('Ошибка загрузки фильтров:', err);
+        } finally {
+            setIsLoadingFilters(false);
+        }
+    };
+
+    useEffect(() => {
+        loadFilterOptions();
+    }, []);
+
+    const handleFilterChange = (name: string, value: string) => {
+        setFilters(prev => {
+            const newFilters = { ...prev, [name]: value };
+
+            // Очищаем взаимосвязанные поля
+            if (name === 'age' && value) newFilters.birthYear = '';
+            if (name === 'birthYear' && value) newFilters.age = '';
+
+            return newFilters;
+        });
+    };
+
+    const handleAdditionalFilterChange = (name: string, value: string) => {
+        setFilters(prev => ({
+            ...prev,
+            additional: { ...prev.additional, [name]: value }
+        }));
+    };
+
+    const handleSearchSubmit = () => {
+        onSearch({
+            searchTerm,
+            ...filters
+        });
+    };
+
+    const filteredGroups = filters.section
+        ? filterOptions.groups.filter(group => group.section.toString() === filters.section)
+        : filterOptions.groups;
+
+    const renderFilters = () => (
+        <div style={{ marginTop: '15px', padding: '15px', border: '1px solid #eee', borderRadius: '5px' }}>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                <select
+                    value={filters.role}
+                    onChange={(e) => handleFilterChange('role', e.target.value)}
+                    style={{ padding: '8px', minWidth: '150px' }}
+                >
+                    <option key={0} value={'0'}>{'турист'}</option>
+                    <option key={1} value={'1'}>{'тренер'}</option>
+                    <option key={2} value={'2'}>{'менеджер'}</option>
+                </select>
+
+                <select
+                    value={filters.section}
+                    onChange={(e) => handleFilterChange('section', e.target.value)}
+                    style={{ padding: '8px', minWidth: '150px' }}
+                >
+                    <option value="">Секция</option>
+                    {filterOptions.sections.map(section => (
+                        <option key={section.id} value={section.id}>{section.title}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={filters.group}
+                    onChange={(e) => handleFilterChange('group', e.target.value)}
+                    style={{ padding: '8px', minWidth: '150px' }}
+                >
+                    <option value="">Группа</option>
+                    {filteredGroups.map(group => (
+                        <option key={group.id} value={group.id}>{group.group_number}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={filters.gender}
+                    onChange={(e) => handleFilterChange('gender', e.target.value)}
+                    style={{ padding: '8px', minWidth: '150px' }}
+                >
+                    <option value="">Пол</option>
+                    <option value="0">Женский</option>
+                    <option value="1">Мужской</option>
+                </select>
+
+                <input
+                    type="number"
+                    placeholder="Возраст"
+                    value={filters.age}
+                    onChange={(e) => handleFilterChange('age', e.target.value)}
+                    min="0"
+                    max="100"
+                    disabled={!!filters.birthYear}
+                    style={{ padding: '8px', width: '100px' }}
+                />
+
+                <input
+                    type="number"
+                    placeholder="Год рождения"
+                    value={filters.birthYear}
+                    onChange={(e) => handleFilterChange('birthYear', e.target.value)}
+                    min="1920"
+                    max="2025"
+                    disabled={!!filters.age}
+                    style={{ padding: '8px', width: '120px' }}
+                />
+            </div>
+
+            {/* Дополнительные фильтры */}
+            {filters.role && (
+                <div style={{ marginTop: '10px' }}>
+                    <h4>Дополнительные настройки</h4>
+                    {renderAdditionalFilters(filters.role)}
+                </div>
+            )}
+
+            <button
+                onClick={handleSearchSubmit}
+                style={{ marginTop: '10px', padding: '8px 16px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px' }}
+            >
+                Поиск
+            </button>
+        </div>
+    );
+
+    const renderAdditionalFilters = (role: string) => {
+        // Здесь можно реализовать логику для разных ролей
+        // Например:
+        if (role === 'teacher') {
+            return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <input
+                        type="text"
+                        placeholder="Предмет"
+                        value={filters.additional.subject || ''}
+                        onChange={(e) => handleAdditionalFilterChange('subject', e.target.value)}
+                        style={{ padding: '8px' }}
+                    />
+                    <input
+                        type="text"
+                        placeholder="Квалификация"
+                        value={filters.additional.qualification || ''}
+                        onChange={(e) => handleAdditionalFilterChange('qualification', e.target.value)}
+                        style={{ padding: '8px' }}
+                    />
+                </div>
+            );
+        }
+        // Другие варианты для разных ролей
+        return null;
+    };
+
     const renderPersonsList = () => {
         if (isLoading && persons.length === 0) {
             return <div style={messageStyle}>Загрузка...</div>;
@@ -215,29 +488,29 @@ const ContentPanel: React.FC<{
 
     return (
         <div style={contentPanelStyle}>
-            <h2 style={{ margin: 0 }}>
-                {currentPage === 'persons' ? 'Персоны' : 'Группы'}
-            </h2>
+            <h2 style={{ margin: 0 }}>Пользователи</h2>
 
-            {currentPage === 'persons' ? (
-                <>
-                    <div style={searchPanelStyle}>
-                        <input
-                            type="text"
-                            placeholder="Поиск по ФИО..."
-                            value={searchTerm}
-                            onChange={onSearchChange}
-                            style={searchInputStyle}
-                        />
-                    </div>
+            <div style={searchPanelStyle}>
+                <input
+                    type="text"
+                    placeholder="Поиск по ФИО..."
+                    value={searchTerm}
+                    onChange={onSearchChange}
+                    style={searchInputStyle}
+                />
+                <button
+                    onClick={() => setIsFiltersExpanded(!isFiltersExpanded)}
+                    style={{ marginLeft: '10px', padding: '8px' }}
+                >
+                    {isFiltersExpanded ? 'Скрыть фильтры' : 'Показать фильтры'}
+                </button>
+            </div>
 
-                    <div style={listContainerStyle}>
-                        {renderPersonsList()}
-                    </div>
-                </>
-            ) : (
-                <div style={messageStyle}>Раздел групп в разработке</div>
-            )}
+            {isFiltersExpanded && renderFilters()}
+
+            <div style={listContainerStyle}>
+                {renderPersonsList()}
+            </div>
         </div>
     );
 };
