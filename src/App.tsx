@@ -23,6 +23,16 @@ interface PersonDetails extends PersonShort {
 }
 
 
+interface PersonProperty {
+    property: string;
+    type: number;
+    value_int: number;
+    value_float: number;
+    value_string: string;
+    value_date: string;
+}
+
+
 
 type PageType = 'persons' | 'groups';
 
@@ -107,24 +117,12 @@ const App: React.FC = () => {
         }
     };
 
-    const fetchPersons = async () => {
-        try {
-            setIsLoading(true);
-            const response = await axios.get<PersonsList>('http://localhost:8080/tourists/filter');
-            setPersons(response.data.persons);
-        } catch (err) {
-            setError('Не удалось загрузить список персон');
-            console.error('Ошибка загрузки:', err);
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     const fetchPersonDetails = async (personId: number) => {
         try {
             setIsLoading(true);
             setError(null);
-            const response = await axios.get<PersonDetails>(`/api/persons/${personId}/details`);
+            const response = await axios.get<PersonDetails>(``);
             setSelectedPerson(response.data);
         } catch (err) {
             setError('Не удалось загрузить детали персоны');
