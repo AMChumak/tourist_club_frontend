@@ -42,7 +42,7 @@ interface CancelableRequest {
 }
 
 
-type PageType = 'persons' | 'championships' | 'workouts';
+type PageType = 'persons' | 'championships' | 'workouts' | 'tours';
 
 // Основной компонент
 const App: React.FC = () => {
@@ -53,6 +53,7 @@ const App: React.FC = () => {
     const [championships, setChampionships] = useState<Championship[]>([]);
     const [selectedPerson, setSelectedPerson] = useState<PersonShort | null>(null);
     const [selectedSection, setSelectedSection] = useState<string>("1");
+    const [selectedRoute, setSelectedRoute] = useState<number | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -260,8 +261,12 @@ const App: React.FC = () => {
 
     const handlePersonSelect = (person: PersonShort) => {
         setSelectedPerson(person);
-
     };
+
+    const handleRouteSelect = (route: number | null) => {
+        setSelectedRoute(route);
+    };
+
 
     // Вспомогательные функции
     const formatFullName = (person: PersonShort) => {
@@ -309,6 +314,17 @@ const App: React.FC = () => {
         cancelAllRequests={cancelAllRequests}
         trackRequest={trackRequest}
         />
+    } else if (currentPage === 'tours') {
+        centralPanel = <ToursPanel
+            isLoading={isLoading}
+            error={error}
+            selectedPerson = {selectedPerson}
+            selectedRoute = {selectedRoute}
+            onPersonSelect = {handlePersonSelect}
+            onRouteSelect = {handleRouteSelect}
+            cancelAllRequests={cancelAllRequests}
+            trackRequest={trackRequest}
+        />
     }
 
     return (
@@ -341,6 +357,7 @@ const NavigationPanel: React.FC<{
         { id: 'persons', label: 'Персоны' },
         { id: 'championships', label: 'Соревнования' },
         { id: 'workouts', label: 'Тренировки' },
+        { id: 'tours', label: 'Путешествия' },
     ];
 
     return (
@@ -1409,6 +1426,951 @@ const TrainingsPanel: React.FC<{
         </div>
     );
 };
+
+
+
+interface RouteType {
+    id: number;
+    type: string;
+}
+
+interface ToursPanelProps {
+    isLoading: boolean;
+    error: string | null;
+    selectedPerson: PersonShort | null;
+    selectedRoute: number | null;
+    onPersonSelect: (person: PersonShort) => void;
+    onRouteSelect: (routeId: number) => void;
+    cancelAllRequests: () => void;
+    trackRequest: (request: { abort: () => void }) => void;
+}
+
+const ToursPanel: React.FC<ToursPanelProps> = ({
+                                                   isLoading,
+                                                   error,
+                                                   selectedPerson,
+                                                   selectedRoute,
+                                                   onPersonSelect,
+                                                   onRouteSelect,
+                                                   cancelAllRequests,
+                                                   trackRequest
+                                               }) => {
+    const [mode, setMode] = useState<
+        'tourists-routes' | 'routes-groups' | 'routes-geo' |
+        'tourists-types' | 'instructors' | 'tourists-instructors' |
+        'tourists-completed'
+    >('tourists-routes');
+
+    // Данные для фильтров
+    const [toursList, setToursList] = useState<number[]>([]);
+    const [routesList, setRoutesList] = useState<number[]>([]);
+    const [placesList, setPlacesList] = useState<number[]>([]);
+    const [routeTypes, setRouteTypes] = useState<RouteType[]>([]);
+    const [sections, setSections] = useState<string[]>([]);
+    const [groups, setGroups] = useState<string[]>([]);
+
+    // Фильтры для разных режимов
+    const [touristsRoutesFilters, setTouristsRoutesFilters] = useState({
+        section: '',
+        group: '',
+        cntTours: 0,
+        tourId: '',
+        tourTime: '',
+        routeId: '',
+        placeId: ''
+    });
+
+    const [routesGroupsFilters, setRoutesGroupsFilters] = useState({
+        section: '',
+        dateFrom: '',
+        dateTo: '',
+        instructor: '',
+        groupCnt: 0
+    });
+
+    const [routesGeoFilters, setRoutesGeoFilters] = useState({
+        place: '',
+        length: 0,
+        difficulty: '1'
+    });
+
+    const [touristsTypesFilters, setTouristsTypesFilters] = useState({
+        typeId: '',
+        difficulty: '1'
+    });
+
+    const [instructorsFilters, setInstructorsFilters] = useState({
+        role: '1',
+        routeType: '',
+        routeDifficulty: '1',
+        cntTours: 0,
+        tourId: '',
+        placeId: ''
+    });
+
+    const [touristsInstructorsFilters, setTouristsInstructorsFilters] = useState({
+        section: '',
+        group: ''
+    });
+
+    const [touristsCompletedFilters, setTouristsCompletedFilters] = useState({
+        allRoutes: false,
+        section: '',
+        group: '',
+        routeIds: ''
+    });
+
+    // Результаты поиска
+    const [persons, setPersons] = useState<PersonShort[]>([]);
+    const [routeIds, setRouteIds] = useState<number[]>([]);
+
+    // Загрузка данных для фильтров
+    useEffect(() => {
+        const loadInitialData = async () => {
+            cancelAllRequests();
+            try {
+                const controller = new AbortController();
+                trackRequest({ abort: () => controller.abort() });
+
+                const [toursRes, routesRes, placesRes, typesRes, sectionsRes, groupsRes] = await Promise.all([
+                    axios.get<number[]>('http://localhost:8080/tours/list', { signal: controller.signal }),
+                    axios.get<number[]>('http://localhost:8080/routes/list', { signal: controller.signal }),
+                    axios.get<number[]>('http://localhost:8080/places/list', { signal: controller.signal }),
+                    axios.get<RouteType[]>('http://localhost:8080/routes/types', { signal: controller.signal }),
+                    axios.get<string[]>('http://localhost:8080/sections/list', { signal: controller.signal }),
+                    axios.get<string[]>('http://localhost:8080/groups/list', { signal: controller.signal })
+                ]);
+
+                setToursList(toursRes.data);
+                setRoutesList(routesRes.data);
+                setPlacesList(placesRes.data);
+                setRouteTypes(typesRes.data);
+                setSections(sectionsRes.data);
+                setGroups(groupsRes.data);
+            } catch (err) {
+                if (!axios.isCancel(err)) {
+                    console.error('Ошибка загрузки данных:', err);
+                }
+            }
+        };
+
+        loadInitialData();
+    }, []);
+
+    // Обработчики поиска для разных режимов
+    const handleTouristsRoutesSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            const params = new URLSearchParams();
+            if (touristsRoutesFilters.section) params.append('section', touristsRoutesFilters.section);
+            if (touristsRoutesFilters.group) params.append('group', touristsRoutesFilters.group);
+            params.append('cnt_tours', touristsRoutesFilters.cntTours.toString());
+            if (touristsRoutesFilters.tourId) params.append('tour_id', touristsRoutesFilters.tourId);
+            if (touristsRoutesFilters.tourTime) params.append('tour_time', touristsRoutesFilters.tourTime);
+            if (touristsRoutesFilters.routeId) params.append('route_id', touristsRoutesFilters.routeId);
+            if (touristsRoutesFilters.placeId) params.append('place_id', touristsRoutesFilters.placeId);
+
+            const response = await axios.get<PersonShort[]>(
+                `http://localhost:8080/tourists/tour-filter?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setPersons(response.data);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска туристов:', err);
+            }
+        }
+    };
+
+    const handleRoutesGroupsSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            const params = new URLSearchParams();
+            if (routesGroupsFilters.section) params.append('section', routesGroupsFilters.section);
+            if (routesGroupsFilters.dateFrom) params.append('date_from', routesGroupsFilters.dateFrom);
+            if (routesGroupsFilters.dateTo) params.append('date_to', routesGroupsFilters.dateTo);
+            if (routesGroupsFilters.instructor) params.append('instructor', routesGroupsFilters.instructor);
+            params.append('group_cnt', routesGroupsFilters.groupCnt.toString());
+
+            const response = await axios.get<{ routeIds: number[] }>(
+                `http://localhost:8080/routes/filter?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setRouteIds(response.data.routeIds);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска маршрутов:', err);
+            }
+        }
+    };
+
+    const handleRoutesGeoSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            const params = new URLSearchParams();
+            if (routesGeoFilters.place) params.append('place', routesGeoFilters.place);
+            params.append('length', routesGeoFilters.length.toString());
+            params.append('difficulty', routesGeoFilters.difficulty);
+
+            const response = await axios.get<{ routeIds: number[] }>(
+                `http://localhost:8080/routes/geofilter?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setRouteIds(response.data.routeIds);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка геопоиска маршрутов:', err);
+            }
+        }
+    };
+
+    const handleTouristsTypesSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            const params = new URLSearchParams();
+            if (touristsTypesFilters.typeId) params.append('type_id', touristsTypesFilters.typeId);
+            params.append('difficulty', touristsTypesFilters.difficulty);
+
+            const response = await axios.get<PersonShort[]>(
+                `http://localhost:8080/tourists/route-filter?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setPersons(response.data);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска по типам:', err);
+            }
+        }
+    };
+
+    const handleInstructorsSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            const params = new URLSearchParams();
+            params.append('role', instructorsFilters.role);
+            if (instructorsFilters.routeType) params.append('type', instructorsFilters.routeType);
+            params.append('difficulty', instructorsFilters.routeDifficulty);
+            params.append('cnt_tours', instructorsFilters.cntTours.toString());
+            if (instructorsFilters.tourId) params.append('tour_id', instructorsFilters.tourId);
+            if (instructorsFilters.placeId) params.append('place_id', instructorsFilters.placeId);
+
+            const response = await axios.get<PersonShort[]>(
+                `http://localhost:8080/instructors/filter?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setPersons(response.data);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска инструкторов:', err);
+            }
+        }
+    };
+
+    const handleTouristsInstructorsSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            const params = new URLSearchParams();
+            if (touristsInstructorsFilters.section) params.append('section', touristsInstructorsFilters.section);
+            if (touristsInstructorsFilters.group) params.append('group', touristsInstructorsFilters.group);
+
+            const response = await axios.get<PersonShort[]>(
+                `http://localhost:8080/tourists/trainer-instructor?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setPersons(response.data);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска туристов-инструкторов:', err);
+            }
+        }
+    };
+
+    const handleTouristsCompletedSearch = async () => {
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({ abort: () => controller.abort() });
+
+            if (touristsCompletedFilters.allRoutes) {
+                const params = new URLSearchParams();
+                if (touristsCompletedFilters.section) params.append('section', touristsCompletedFilters.section);
+                if (touristsCompletedFilters.group) params.append('group', touristsCompletedFilters.group);
+
+                const response = await axios.get<PersonShort[]>(
+                    `http://localhost:8080/tourists/completed-all?${params.toString()}`,
+                    { signal: controller.signal }
+                );
+
+                setPersons(response.data);
+            } else {
+                const routeIdsArray = touristsCompletedFilters.routeIds
+                    .split(',')
+                    .map(id => parseInt(id.trim()))
+                    .filter(id => !isNaN(id));
+
+                const response = await axios.post<PersonShort[]>(
+                    `http://localhost:8080/tourists/completed?section=${touristsCompletedFilters.section}&group=${touristsCompletedFilters.group}`,
+                    routeIdsArray,
+                    { signal: controller.signal }
+                );
+
+                setPersons(response.data);
+            }
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска выполненных маршрутов:', err);
+            }
+        }
+    };
+
+    // Рендер фильтров для разных режимов
+    const renderTouristsRoutesFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <select
+                    value={touristsRoutesFilters.section}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, section: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите секцию</option>
+                    {sections.map(section => (
+                        <option key={section} value={section}>{section}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={touristsRoutesFilters.group}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, group: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите группу</option>
+                    {groups.map(group => (
+                        <option key={group} value={group}>{group}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div style={filterRowStyle}>
+                <input
+                    type="number"
+                    min="0"
+                    value={touristsRoutesFilters.cntTours}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, cntTours: parseInt(e.target.value) || 0})}
+                    style={inputStyle}
+                    placeholder="Число маршрутов"
+                />
+
+                <select
+                    value={touristsRoutesFilters.tourId}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, tourId: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите тур</option>
+                    {toursList.map(tourId => (
+                        <option key={tourId} value={tourId.toString()}>{tourId}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div style={filterRowStyle}>
+                <input
+                    type="date"
+                    value={touristsRoutesFilters.tourTime}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, tourTime: e.target.value})}
+                    style={inputStyle}
+                    placeholder="Дата маршрута"
+                />
+
+                <select
+                    value={touristsRoutesFilters.routeId}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, routeId: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите маршрут</option>
+                    {routesList.map(routeId => (
+                        <option key={routeId} value={routeId.toString()}>{routeId}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div style={filterRowStyle}>
+                <select
+                    value={touristsRoutesFilters.placeId}
+                    onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, placeId: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите место</option>
+                    {placesList.map(placeId => (
+                        <option key={placeId} value={placeId.toString()}>{placeId}</option>
+                    ))}
+                </select>
+            </div>
+
+            <button onClick={handleTouristsRoutesSearch} style={buttonStyle}>
+                Найти туристов
+            </button>
+        </div>
+    );
+
+    const renderRoutesGroupsFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <select
+                    value={routesGroupsFilters.section}
+                    onChange={(e) => setRoutesGroupsFilters({...routesGroupsFilters, section: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите секцию</option>
+                    {sections.map(section => (
+                        <option key={section} value={section}>{section}</option>
+                    ))}
+                </select>
+
+                <input
+                    type="date"
+                    value={routesGroupsFilters.dateFrom}
+                    onChange={(e) => setRoutesGroupsFilters({...routesGroupsFilters, dateFrom: e.target.value})}
+                    style={inputStyle}
+                    placeholder="Начало периода"
+                />
+
+                <input
+                    type="date"
+                    value={routesGroupsFilters.dateTo}
+                    onChange={(e) => setRoutesGroupsFilters({...routesGroupsFilters, dateTo: e.target.value})}
+                    style={inputStyle}
+                    placeholder="Конец периода"
+                />
+            </div>
+
+            <div style={filterRowStyle}>
+                <input
+                    type="text"
+                    value={routesGroupsFilters.instructor}
+                    onChange={(e) => setRoutesGroupsFilters({...routesGroupsFilters, instructor: e.target.value})}
+                    style={inputStyle}
+                    placeholder="ID инструктора"
+                />
+
+                <input
+                    type="number"
+                    min="0"
+                    value={routesGroupsFilters.groupCnt}
+                    onChange={(e) => setRoutesGroupsFilters({...routesGroupsFilters, groupCnt: parseInt(e.target.value) || 0})}
+                    style={inputStyle}
+                    placeholder="Число групп"
+                />
+            </div>
+
+            <button onClick={handleRoutesGroupsSearch} style={buttonStyle}>
+                Найти маршруты
+            </button>
+        </div>
+    );
+
+    const renderRoutesGeoFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <select
+                    value={routesGeoFilters.place}
+                    onChange={(e) => setRoutesGeoFilters({...routesGeoFilters, place: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите место</option>
+                    {placesList.map(placeId => (
+                        <option key={placeId} value={placeId.toString()}>{placeId}</option>
+                    ))}
+                </select>
+
+                <input
+                    type="number"
+                    min="0"
+                    value={routesGeoFilters.length}
+                    onChange={(e) => setRoutesGeoFilters({...routesGeoFilters, length: parseInt(e.target.value) || 0})}
+                    style={inputStyle}
+                    placeholder="Длина маршрута"
+                />
+
+                <select
+                    value={routesGeoFilters.difficulty}
+                    onChange={(e) => setRoutesGeoFilters({...routesGeoFilters, difficulty: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="1">Легкий</option>
+                    <option value="5">Нормальный</option>
+                    <option value="10">Сложный</option>
+                </select>
+            </div>
+
+            <button onClick={handleRoutesGeoSearch} style={buttonStyle}>
+                Найти маршруты
+            </button>
+        </div>
+    );
+
+    const renderTouristsTypesFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <select
+                    value={touristsTypesFilters.typeId}
+                    onChange={(e) => setTouristsTypesFilters({...touristsTypesFilters, typeId: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите тип</option>
+                    {routeTypes.map(type => (
+                        <option key={type.id} value={type.id.toString()}>{type.type}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={touristsTypesFilters.difficulty}
+                    onChange={(e) => setTouristsTypesFilters({...touristsTypesFilters, difficulty: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="1">Легкий</option>
+                    <option value="5">Нормальный</option>
+                    <option value="10">Сложный</option>
+                </select>
+            </div>
+
+            <button onClick={handleTouristsTypesSearch} style={buttonStyle}>
+                Найти туристов
+            </button>
+        </div>
+    );
+
+    const renderInstructorsFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <select
+                    value={instructorsFilters.role}
+                    onChange={(e) => setInstructorsFilters({...instructorsFilters, role: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="1">Спортсмен</option>
+                    <option value="2">Тренер</option>
+                </select>
+
+                <select
+                    value={instructorsFilters.routeType}
+                    onChange={(e) => setInstructorsFilters({...instructorsFilters, routeType: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите тип</option>
+                    {routeTypes.map(type => (
+                        <option key={type.id} value={type.id.toString()}>{type.type}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={instructorsFilters.routeDifficulty}
+                    onChange={(e) => setInstructorsFilters({...instructorsFilters, routeDifficulty: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="1">Легкий</option>
+                    <option value="5">Нормальный</option>
+                    <option value="10">Сложный</option>
+                </select>
+            </div>
+
+            <div style={filterRowStyle}>
+                <input
+                    type="number"
+                    min="0"
+                    value={instructorsFilters.cntTours}
+                    onChange={(e) => setInstructorsFilters({...instructorsFilters, cntTours: parseInt(e.target.value) || 0})}
+                    style={inputStyle}
+                    placeholder="Число туров"
+                />
+
+                <select
+                    value={instructorsFilters.tourId}
+                    onChange={(e) => setInstructorsFilters({...instructorsFilters, tourId: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите тур</option>
+                    {toursList.map(tourId => (
+                        <option key={tourId} value={tourId.toString()}>{tourId}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div style={filterRowStyle}>
+                <select
+                    value={instructorsFilters.placeId}
+                    onChange={(e) => setInstructorsFilters({...instructorsFilters, placeId: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите место</option>
+                    {placesList.map(placeId => (
+                        <option key={placeId} value={placeId.toString()}>{placeId}</option>
+                    ))}
+                </select>
+            </div>
+
+            <button onClick={handleInstructorsSearch} style={buttonStyle}>
+                Найти инструкторов
+            </button>
+        </div>
+    );
+
+    const renderTouristsInstructorsFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <select
+                    value={touristsInstructorsFilters.section}
+                    onChange={(e) => setTouristsInstructorsFilters({...touristsInstructorsFilters, section: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите секцию</option>
+                    {sections.map(section => (
+                        <option key={section} value={section}>{section}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={touristsInstructorsFilters.group}
+                    onChange={(e) => setTouristsInstructorsFilters({...touristsInstructorsFilters, group: e.target.value})}
+                    style={selectStyle}
+                >
+                    <option value="">Выберите группу</option>
+                    {groups.map(group => (
+                        <option key={group} value={group}>{group}</option>
+                    ))}
+                </select>
+            </div>
+
+            <button onClick={handleTouristsInstructorsSearch} style={buttonStyle}>
+                Найти туристов-инструкторов
+            </button>
+        </div>
+    );
+
+    const renderTouristsCompletedFilter = () => (
+        <div style={filterContainerStyle}>
+            <div style={filterRowStyle}>
+                <label style={{ display: 'flex', alignItems: 'center' }}>
+                    <input
+                        type="checkbox"
+                        checked={touristsCompletedFilters.allRoutes}
+                        onChange={(e) => setTouristsCompletedFilters({
+                            ...touristsCompletedFilters,
+                            allRoutes: e.target.checked
+                        })}
+                        style={{ marginRight: '8px' }}
+                    />
+                    Все маршруты
+                </label>
+            </div>
+
+            <div style={filterRowStyle}>
+                <select
+                    value={touristsCompletedFilters.section}
+                    onChange={(e) => setTouristsCompletedFilters({...touristsCompletedFilters, section: e.target.value})}
+                    style={selectStyle}
+                    disabled={!touristsCompletedFilters.allRoutes}
+                >
+                    <option value="">Выберите секцию</option>
+                    {sections.map(section => (
+                        <option key={section} value={section}>{section}</option>
+                    ))}
+                </select>
+
+                <select
+                    value={touristsCompletedFilters.group}
+                    onChange={(e) => setTouristsCompletedFilters({...touristsCompletedFilters, group: e.target.value})}
+                    style={selectStyle}
+                    disabled={!touristsCompletedFilters.allRoutes}
+                >
+                    <option value="">Выберите группу</option>
+                    {groups.map(group => (
+                        <option key={group} value={group}>{group}</option>
+                    ))}
+                </select>
+            </div>
+
+            {!touristsCompletedFilters.allRoutes && (
+                <div style={filterRowStyle}>
+                    <input
+                        type="text"
+                        value={touristsCompletedFilters.routeIds}
+                        onChange={(e) => setTouristsCompletedFilters({...touristsCompletedFilters, routeIds: e.target.value})}
+                        style={inputStyle}
+                        placeholder="ID маршрутов через запятую"
+                    />
+                </div>
+            )}
+
+            <button onClick={handleTouristsCompletedSearch} style={buttonStyle}>
+                Найти туристов
+            </button>
+        </div>
+    );
+
+    // Рендер результатов поиска
+    const renderPersonsList = () => {
+        if (isLoading && persons.length === 0) {
+            return <div style={messageStyle}>Загрузка...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        if (persons.length === 0) {
+            return <div style={messageStyle}>Ничего не найдено</div>;
+        }
+
+        return (
+            <div style={listContainerStyle}>
+                {persons.map(person => (
+                    <button
+                        key={person.id}
+                        onClick={() => onPersonSelect(person)}
+                        style={{
+                            ...listItemStyle,
+                            backgroundColor: selectedPerson?.id === person.id ? '#e0e0e0' : 'white',
+                        }}
+                    >
+                        {`${person.surname} ${person.name} ${person.patronymic}`}
+                    </button>
+                ))}
+            </div>
+        );
+    };
+
+    const renderRouteIdsList = () => {
+        if (isLoading && routeIds.length === 0) {
+            return <div style={messageStyle}>Загрузка...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        if (routeIds.length === 0) {
+            return <div style={messageStyle}>Маршруты не найдены</div>;
+        }
+
+        return (
+            <div style={listContainerStyle}>
+                {routeIds.map(routeId => (
+                    <button
+                        key={routeId}
+                        onClick={() => onRouteSelect(routeId)}
+                        style={{
+                            ...listItemStyle,
+                            backgroundColor: selectedRoute === routeId ? '#e0e0e0' : 'white',
+                        }}
+                    >
+                        Маршрут {routeId}
+                    </button>
+                ))}
+            </div>
+        );
+    };
+
+    // Выбор текущего фильтра для рендера
+    const renderCurrentFilter = () => {
+        switch (mode) {
+            case 'tourists-routes':
+                return renderTouristsRoutesFilter();
+            case 'routes-groups':
+                return renderRoutesGroupsFilter();
+            case 'routes-geo':
+                return renderRoutesGeoFilter();
+            case 'tourists-types':
+                return renderTouristsTypesFilter();
+            case 'instructors':
+                return renderInstructorsFilter();
+            case 'tourists-instructors':
+                return renderTouristsInstructorsFilter();
+            case 'tourists-completed':
+                return renderTouristsCompletedFilter();
+            default:
+                return null;
+        }
+    };
+
+    // Определяем, нужно ли рендерить список персон или маршрутов
+    const shouldRenderPersonsList = ['tourists-routes', 'tourists-types', 'instructors', 'tourists-instructors', 'tourists-completed'].includes(mode);
+    const shouldRenderRouteIdsList = ['routes-groups', 'routes-geo'].includes(mode);
+
+    return (
+        <div style={panelStyle}>
+            <h2 style={{ margin: '0 0 20px 0' }}>Фильтры туров</h2>
+
+            <div style={tabsContainerStyle}>
+                <button
+                    onClick={() => setMode('tourists-routes')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'tourists-routes' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'tourists-routes' ? 'white' : 'black',
+                    }}
+                >
+                    Туристы-Маршруты
+                </button>
+                <button
+                    onClick={() => setMode('routes-groups')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'routes-groups' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'routes-groups' ? 'white' : 'black',
+                    }}
+                >
+                    Маршруты-Группы
+                </button>
+                <button
+                    onClick={() => setMode('routes-geo')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'routes-geo' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'routes-geo' ? 'white' : 'black',
+                    }}
+                >
+                    Маршруты-Гео
+                </button>
+                <button
+                    onClick={() => setMode('tourists-types')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'tourists-types' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'tourists-types' ? 'white' : 'black',
+                    }}
+                >
+                    Туристы-Типы
+                </button>
+                <button
+                    onClick={() => setMode('instructors')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'instructors' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'instructors' ? 'white' : 'black',
+                    }}
+                >
+                    Инструкторы
+                </button>
+                <button
+                    onClick={() => setMode('tourists-instructors')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'tourists-instructors' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'tourists-instructors' ? 'white' : 'black',
+                    }}
+                >
+                    Туристы-инструкторы
+                </button>
+                <button
+                    onClick={() => setMode('tourists-completed')}
+                    style={{
+                        ...tabButtonStyle,
+                        backgroundColor: mode === 'tourists-completed' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'tourists-completed' ? 'white' : 'black',
+                    }}
+                >
+                    Выполненные маршруты
+                </button>
+            </div>
+
+            {renderCurrentFilter()}
+
+            {shouldRenderPersonsList && renderPersonsList()}
+            {shouldRenderRouteIdsList && renderRouteIdsList()}
+        </div>
+    );
+};
+
+// Стили
+const panelStyle: React.CSSProperties = {
+    padding: '20px',
+    backgroundColor: '#f9f9f9',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+    maxWidth: '800px',
+    margin: '0 auto'
+};
+
+const tabsContainerStyle: React.CSSProperties = {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px',
+    marginBottom: '20px'
+};
+
+const tabButtonStyle: React.CSSProperties = {
+    padding: '8px 12px',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    whiteSpace: 'nowrap'
+};
+
+const filterContainerStyle: React.CSSProperties = {
+    marginTop: '15px',
+    padding: '15px',
+    border: '1px solid #eee',
+    borderRadius: '5px',
+    backgroundColor: 'white'
+};
+
+const filterRowStyle: React.CSSProperties = {
+    display: 'flex',
+    gap: '10px',
+    marginBottom: '10px',
+    flexWrap: 'wrap'
+};
+
+const selectStyle: React.CSSProperties = {
+    padding: '8px',
+    minWidth: '200px',
+    borderRadius: '4px',
+    border: '1px solid #ddd'
+};
+
+const inputStyle: React.CSSProperties = {
+    padding: '8px',
+    minWidth: '200px',
+    borderRadius: '4px',
+    border: '1px solid #ddd'
+};
+
+const buttonStyle: React.CSSProperties = {
+    marginTop: '10px',
+    padding: '8px 16px',
+    backgroundColor: '#4CAF50',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    cursor: 'pointer'
+};
+
+
 
 const appStyle: CSSProperties = {
     display: 'flex',
