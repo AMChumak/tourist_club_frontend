@@ -11,6 +11,12 @@ interface PersonsList {
     persons: PersonShort[];
 }
 
+interface ChampionshipsList {
+    page: number;
+    total: number;
+    championships: Championship[];
+}
+
 interface PersonShort {
     id: number;
     name: string;
@@ -18,39 +24,55 @@ interface PersonShort {
     patronymic: string;
 }
 
-interface PersonDetails extends PersonShort {
-    properties: Record<string, string>;
+
+interface PersonAttribute {
+    id: number;
+    attr: string;
+    role: number;
+    attr_type: number;
+}
+
+interface AttributeValue {
+    attr_id: number;
+    value: number | string | null;
+}
+
+interface CancelableRequest {
+    abort: () => void;
 }
 
 
-interface PersonProperty {
-    property: string;
-    type: number;
-    value_int: number;
-    value_float: number;
-    value_string: string;
-    value_date: string;
-}
-
-
-
-type PageType = 'persons' | 'groups';
+type PageType = 'persons' | 'championships';
 
 // Основной компонент
 const App: React.FC = () => {
+    const [activeRequests, setActiveRequests] = useState<CancelableRequest[]>([]);
     const [currentPage, setCurrentPage] = useState<PageType>('persons');
     const [searchTerm, setSearchTerm] = useState('');
     const [persons, setPersons] = useState<PersonShort[]>([]);
-    const [selectedPerson, setSelectedPerson] = useState<PersonDetails | null>(null);
+    const [championships, setChampionships] = useState<Championship[]>([]);
+    const [selectedPerson, setSelectedPerson] = useState<PersonShort | null>(null);
+    const [selectedSection, setSelectedSection] = useState<string>("1");
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    /*// Эффекты и загрузка данных
+    // Функция для добавления запроса в отслеживаемые
+    const trackRequest = (request: CancelableRequest) => {
+        setActiveRequests(prev => [...prev, request]);
+        return request;
+    };
+
+    // Функция очистки всех активных запросов
+    const cancelAllRequests = () => {
+        activeRequests.forEach(req => req.abort());
+        setActiveRequests([]);
+    };
+
     useEffect(() => {
-        if (currentPage === 'persons') {
-            fetchPersons();
-        }
-    }, [currentPage]);*/
+        return () => {
+            cancelAllRequests();
+        };
+    }, []);
 
     const onSearch = async (filters: {
         searchTerm: string;
@@ -62,9 +84,15 @@ const App: React.FC = () => {
         birthYear?: string;
         additional?: Record<string, string>;
     }) => {
+        cancelAllRequests();
         try {
             setIsLoading(true);
             setError(null);
+
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
 
             // Определяем endpoint в зависимости от роли
             let endpoint = '';
@@ -100,7 +128,9 @@ const App: React.FC = () => {
             }
 
             // Отправляем запрос
-            const response = await axios.get<PersonsList>(`http://localhost:8080${endpoint}?${params.toString()}`);
+            const response = await axios.get<PersonsList>(`http://localhost:8080${endpoint}?${params.toString()}`, {
+                signal: controller.signal
+            });
 
             // Обрабатываем ответ
             if (!Array.isArray(response.data.persons)) {
@@ -109,8 +139,10 @@ const App: React.FC = () => {
 
             setPersons(response.data.persons);
         } catch (err) {
-            setError('Ошибка при выполнении поиска');
-            console.error('Ошибка поиска:', err);
+            if (!axios.isCancel(err)) {
+                setError('Ошибка при выполнении поиска');
+                console.error('Ошибка поиска:', err);
+            }
             setPersons([]);
         } finally {
             setIsLoading(false);
@@ -118,24 +150,13 @@ const App: React.FC = () => {
     };
 
 
-    const fetchPersonDetails = async (personId: number) => {
-        try {
-            setIsLoading(true);
-            setError(null);
-            const response = await axios.get<PersonDetails>(``);
-            setSelectedPerson(response.data);
-        } catch (err) {
-            setError('Не удалось загрузить детали персоны');
-            console.error('Ошибка загрузки:', err);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+    const updateSelectedSection = (value:string) => {
+        setSelectedSection(value);
+    }
 
     // Обработчики событий
     const handleNavItemClick = (page: PageType) => {
         setCurrentPage(page);
-        setSelectedPerson(null);
         setSearchTerm('');
     };
 
@@ -144,8 +165,8 @@ const App: React.FC = () => {
     };
 
     const handlePersonSelect = (person: PersonShort) => {
-        setSelectedPerson(null);
-        fetchPersonDetails(person.id);
+        setSelectedPerson(person);
+
     };
 
     // Вспомогательные функции
@@ -158,6 +179,33 @@ const App: React.FC = () => {
         return fullName.includes(searchTerm.toLowerCase());
     });
 
+    let centralPanel;
+
+    if(currentPage === 'persons') {
+        centralPanel = <ContentPanel
+            isLoading={isLoading}
+            error={error}
+            persons={persons}
+            filteredPersons={filteredPersons}
+            selectedPerson={selectedPerson}
+            searchTerm={searchTerm}
+            onSearch={onSearch}
+            updateSelectedSection={updateSelectedSection}
+            onSearchChange={handleSearchChange}
+            onPersonSelect={handlePersonSelect}
+            formatFullName={formatFullName}
+            cancelAllRequests={cancelAllRequests}
+            trackRequest={trackRequest}
+        />;
+    } else if (currentPage === 'championships') {
+        centralPanel = <ChampionshipsPanel
+            isLoading={isLoading}
+            error={error}
+            cancelAllRequests={cancelAllRequests}
+            trackRequest={trackRequest}
+            />
+    }
+
     return (
         <div style={appStyle}>
             <NavigationPanel
@@ -165,22 +213,12 @@ const App: React.FC = () => {
                 onNavItemClick={handleNavItemClick}
             />
 
-            <ContentPanel
-                isLoading={isLoading}
-                error={error}
-                persons={persons}
-                filteredPersons={filteredPersons}
-                selectedPerson={selectedPerson}
-                searchTerm={searchTerm}
-                onSearch={onSearch}
-                onSearchChange={handleSearchChange}
-                onPersonSelect={handlePersonSelect}
-                formatFullName={formatFullName}
-            />
+            {centralPanel}
 
             <DetailsPanel
                 currentPage={currentPage}
                 selectedPerson={selectedPerson}
+                currentSection={selectedSection}
                 isLoading={isLoading}
                 error={error}
                 formatFullName={formatFullName}
@@ -196,12 +234,12 @@ const NavigationPanel: React.FC<{
 }> = ({ currentPage, onNavItemClick }) => {
     const navItems = [
         { id: 'persons', label: 'Персоны' },
-        { id: 'groups', label: 'Группы' },
+        { id: 'championships', label: 'Соревнования' },
     ];
 
     return (
         <div style={navPanelStyle}>
-            <h3 style={{ marginTop: 0 }}>Навигация</h3>
+            <h3 style={{ marginTop: 0 }}>Туристический клуб</h3>
             <ul style={navListStyle}>
                 {navItems.map((item) => (
                     <li
@@ -253,23 +291,29 @@ const ContentPanel: React.FC<{
     error: string | null;
     persons: PersonShort[];
     filteredPersons: PersonShort[];
-    selectedPerson: PersonDetails | null;
+    updateSelectedSection: (value: string) => void;
+    selectedPerson: PersonShort | null;
     searchTerm: string;
     onSearchChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onPersonSelect: (person: PersonShort) => void;
     formatFullName: (person: PersonShort) => string;
     onSearch: (filters: any) => void;
+    cancelAllRequests: () => void;
+    trackRequest:(request: CancelableRequest)=>CancelableRequest;
 }> = ({
           isLoading,
           error,
           persons,
           filteredPersons,
+          updateSelectedSection,
           selectedPerson,
           searchTerm,
           onSearchChange,
           onPersonSelect,
           formatFullName,
-          onSearch
+          onSearch,
+          cancelAllRequests,
+          trackRequest
       }) => {
     const [filterOptions, setFilterOptions] = useState<FilterOptions>({
         roles: [],
@@ -278,7 +322,7 @@ const ContentPanel: React.FC<{
     });
     const [filters, setFilters] = useState({
         role: '0',
-        section: '',
+        section: '-1',
         group: '',
         gender: '',
         age: '',
@@ -290,12 +334,19 @@ const ContentPanel: React.FC<{
 
     // Загрузка опций фильтров
     const loadFilterOptions = async () => {
+        cancelAllRequests();
         try {
             setIsLoadingFilters(true);
+
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
             const [rolesRes, sectionsRes, groupsRes] = await Promise.all([
-                axios.get<PersonRole[]>('http://localhost:8080/roles/list'),
-                axios.get<Section[]>('http://localhost:8080/sections/list'),
-                axios.get<Group[]>('http://localhost:8080/groups/list')
+                axios.get<PersonRole[]>('http://localhost:8080/roles/list', { signal: controller.signal }),
+                axios.get<Section[]>('http://localhost:8080/sections/list', { signal: controller.signal }),
+                axios.get<Group[]>('http://localhost:8080/groups/list', { signal: controller.signal })
             ]);
 
             setFilterOptions({
@@ -305,7 +356,9 @@ const ContentPanel: React.FC<{
             });
 
         } catch (err) {
-            console.error('Ошибка загрузки фильтров:', err);
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка загрузки фильтров:', err);
+            }
         } finally {
             setIsLoadingFilters(false);
         }
@@ -316,6 +369,10 @@ const ContentPanel: React.FC<{
     }, []);
 
     const handleFilterChange = (name: string, value: string) => {
+        //todo
+        if (name === "section") {
+            updateSelectedSection(value);
+        }
         setFilters(prev => {
             const newFilters = { ...prev, [name]: value };
 
@@ -513,32 +570,215 @@ const ContentPanel: React.FC<{
     );
 };
 
-// Компонент правой панели с деталями
 const DetailsPanel: React.FC<{
     currentPage: PageType;
-    selectedPerson: PersonDetails | null;
+    selectedPerson: PersonShort | null;
     isLoading: boolean;
     error: string | null;
     formatFullName: (person: PersonShort) => string;
-}> = ({ currentPage, selectedPerson, isLoading, error, formatFullName }) => {
+    currentSection: string; // Добавляем текущую секцию из фильтров
+}> = ({ currentPage, selectedPerson, isLoading, error, formatFullName, currentSection }) => {
+    const [attributes, setAttributes] = useState<PersonAttribute[]>([]);
+    const [attributeValues, setAttributeValues] = useState<AttributeValue[]>([]);
+    const [personRole, setPersonRole] = useState<number | null>(null);
+    const [detailsLoading, setDetailsLoading] = useState(false);
+    const [detailsError, setDetailsError] = useState<string | null>(null);
+
+    // Загрузка данных при выборе персоны
+    useEffect(() => {
+
+        const controller = new AbortController();
+        let isMounted = true;
+
+        const fetchPersonDetails = async () => {
+            if (!selectedPerson || !currentSection) return;
+
+            try {
+                setDetailsLoading(true);
+                setDetailsError(null);
+                setAttributes([]);
+                setAttributeValues([]);
+                setPersonRole(null);
+
+                // 1. Получаем роль персоны
+                const roleResponse = await axios.get<{ role: number | null }>(
+                    `http://localhost:8080/persons/roles?person=${selectedPerson.id.toString()}&section=${currentSection}`,
+                    { signal: controller.signal }
+                );
+                if (!isMounted) return;
+                if (roleResponse.data === null) {
+                    setPersonRole(-1);
+                } else {
+                    setPersonRole(roleResponse.data.role);
+                }
+
+
+                // 2. Получаем список атрибутов
+                const attributesResponse = await axios.get<PersonAttribute[]>(
+                    'http://localhost:8080/person-attributes/list',
+                    { signal: controller.signal }
+                );
+                if (!isMounted) return;
+                setAttributes(attributesResponse.data);
+
+                // 3. Фильтруем атрибуты по роли и загружаем значения
+                const filteredAttributes = attributesResponse.data.filter(
+                    attr => attr.role === -1 || attr.role === roleResponse.data.role
+                );
+                console.log("i am alive! ", filteredAttributes);
+
+                // 4. Загружаем значения для каждого атрибута
+                const valuesPromises = filteredAttributes.map(async attr => {
+                    try {
+                        let value: number | string | null = null;
+
+                        switch (attr.attr_type) {
+                            case 1: // int
+                                const intRes = await axios.get<{ value: number | null }>(
+                                    `http://localhost:8080/persons/attribute/int?person=${selectedPerson.id}&attribute=${attr.id}`,
+                                    { signal: controller.signal }
+                                );
+                                if (intRes.data === null) {
+                                    value = null;
+                                } else {
+                                    // @ts-ignore
+                                    value = intRes.data;
+                                    console.log("writed in value ", value);
+                                }
+                                break;
+
+                            case 2: // float
+                                const floatRes = await axios.get<{ value: number | null }>(
+                                    `http://localhost:8080/persons/attribute/float?person=${selectedPerson.id}&attribute=${attr.id}`,
+                                    { signal: controller.signal }
+                                );
+
+                                if (floatRes.data === null) {
+                                    value = null;
+                                } else {
+                                    // @ts-ignore
+                                    value = floatRes.data;
+                                }
+                                break;
+
+                            case 3: // string
+                                const stringRes = await axios.get<{ value: string | null }>(
+                                    `http://localhost:8080/persons/attribute/string?person=${selectedPerson.id}&attribute=${attr.id}`,
+                                    { signal: controller.signal }
+                                );
+                                if (stringRes.data === null) {
+                                    value = null;
+                                } else {
+                                    // @ts-ignore
+                                    value = stringRes.data;
+                                }
+                                break;
+
+                            case 4: // date
+                                const dateRes = await axios.get<{ value: string | null }>(
+                                    `http://localhost:8080/persons/attribute/date?person=${selectedPerson.id}&attribute=${attr.id}`,
+                                    { signal: controller.signal }
+                                );
+                                if (dateRes.data === null) {
+                                    value = null;
+                                } else {
+                                    // @ts-ignore
+                                    value = dateRes.data;
+                                }
+                                break;
+                        }
+                        return { attr_id: attr.id, value };
+                    } catch (err) {
+                        console.error(`Ошибка загрузки атрибута ${attr.id}:`, err);
+                        return { attr_id: attr.id, value: null };
+                    }
+                });
+
+                const values = await Promise.all(valuesPromises);
+
+                setAttributeValues(values);
+            } catch (err) {
+                if (!isMounted) return;
+                if (axios.isCancel(err)) {
+                    console.log('Request canceled:', err.message);
+                } else {
+                    setDetailsError('Ошибка загрузки деталей персоны');
+                    console.error('Ошибка загрузки:', err);
+                }
+            } finally {
+                if (isMounted) {
+                    setDetailsLoading(false);
+                }
+            }
+        };
+
+        fetchPersonDetails();
+
+        return () => {
+            isMounted = false;
+            controller.abort();
+        };
+    }, [selectedPerson, currentSection]);
+
+
+    const formatValue = (value: number | string | null, attr_id: number) => {
+
+        let result: number | string | null;
+        result = value;
+
+        if (attr_id === 1) {
+            if (value === 0) {
+                result = "женский";
+            } else {
+                result = "мужской";
+            }
+        }
+
+        return result;
+    }
+
+    const formatRole = (role: number | null) => {
+        if (role === null) {
+            return "Нет роли в секции";
+        }
+        switch (role){
+            case 0: return "любитель";
+            case 1: return "спортсмен";
+            case 2: return "тренер";
+            case 3: return "менеджер";
+        }
+        return "Нет роли в секции";
+    }
+
     const renderPersonDetails = () => {
         if (!selectedPerson) {
             return (
                 <div style={messageStyle}>
-                    {currentPage === 'persons'
-                        ? 'Выберите персону для просмотра деталей'
-                        : 'Выберите группу для просмотра деталей'}
+                    Выберите персону для просмотра деталей
                 </div>
             );
         }
 
-        if (isLoading) {
+        if (isLoading || detailsLoading) {
             return <div style={messageStyle}>Загрузка деталей...</div>;
         }
 
-        if (error) {
-            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        if (error || detailsError) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error || detailsError}</div>;
         }
+
+        // Формируем список атрибутов для отображения
+        const displayAttributes = attributes
+            .filter(attr => personRole === null || attr.role === -1 || attr.role === personRole)
+            .map(attr => {
+                const valueObj = attributeValues.find(v => v.attr_id === attr.id);
+
+                return {
+                    name: attr.attr,
+                    value: valueObj ? formatValue(valueObj.value, attr.id) : null,
+                    type: attr.attr_type
+                };
+            });
 
         return (
             <>
@@ -552,10 +792,23 @@ const DetailsPanel: React.FC<{
                         <span>{selectedPerson.id}</span>
                     </div>
 
-                    {Object.entries(selectedPerson.properties).map(([key, value]) => (
-                        <div key={key} style={propertyRowStyle}>
-                            <span style={propertyLabelStyle}>{key}:</span>
-                            <span>{value}</span>
+                    {personRole !== null && (
+                        <div style={propertyRowStyle}>
+                            <span style={propertyLabelStyle}>Роль в секции:</span>
+                            <span>{formatRole(personRole)}</span>
+                        </div>
+                    )}
+
+                    {displayAttributes.map((attr, index) => (
+                        <div key={index} style={propertyRowStyle}>
+                            <span style={propertyLabelStyle}>{attr.name}:</span>
+                            <span>
+                {attr.value !== null ? (
+                    attr.value
+                ) : (
+                    <span style={{ color: '#999' }}>не указано</span>
+                )}
+              </span>
                         </div>
                     ))}
                 </div>
@@ -563,9 +816,166 @@ const DetailsPanel: React.FC<{
         );
     };
 
+    // Вспомогательная функция для форматирования даты
+    const formatDate = (dateString: string) => {
+        try {
+            return new Date(dateString).toLocaleDateString();
+        } catch {
+            return dateString;
+        }
+    };
+
     return (
         <div style={detailsPanelStyle}>
             {renderPersonDetails()}
+        </div>
+    );
+};
+
+interface Championship {
+    id: number;
+    title: string;
+    date: string;
+}
+
+interface ChampionshipsResponse {
+    page: number;
+    total: number;
+    championships: Championship[];
+}
+
+const ChampionshipsPanel: React.FC<{
+    isLoading: boolean;
+    error: string | null;
+    cancelAllRequests: () => void;
+    trackRequest: (request: CancelableRequest) => CancelableRequest;
+}> = ({ isLoading, error, cancelAllRequests, trackRequest }) => {
+    const [championships, setChampionships] = useState<Championship[]>([]);
+    const [sections, setSections] = useState<Section[]>([]);
+    const [selectedSection, setSelectedSection] = useState<string>("");
+
+    // Загрузка списка секций
+    const loadSections = async () => {
+        cancelAllRequests();
+        try {
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            const response = await axios.get<Section[]>(
+                'http://localhost:8080/sections/list',
+                { signal: controller.signal }
+            );
+            setSections(response.data);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка загрузки секций:', err);
+            }
+        }
+    };
+
+    // Загрузка соревнований
+    const loadChampionships = async (sectionId: string) => {
+        cancelAllRequests();
+        try {
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            const params = new URLSearchParams();
+            if (sectionId) {
+                params.append('section', sectionId);
+            }
+
+            const response = await axios.get<ChampionshipsResponse>(
+                `http://localhost:8080/championships/filter?${params.toString()}`,
+                { signal: controller.signal }
+            );
+
+            setChampionships(response.data.championships);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка загрузки соревнований:', err);
+            }
+        }
+    };
+
+    useEffect(() => {
+        loadSections();
+    }, []);
+
+    const handleSectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const sectionId = e.target.value;
+        setSelectedSection(sectionId);
+        loadChampionships(sectionId);
+    };
+
+    const renderChampionshipsList = () => {
+        if (isLoading && championships.length === 0) {
+            return <div style={messageStyle}>Загрузка...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        if (championships.length === 0) {
+            return <div style={messageStyle}>Соревнования не найдены</div>;
+        }
+
+        return (
+            <div style={listContainerStyle}>
+                {championships.map(championship => (
+                    <div
+                        key={championship.id}
+                        style={{
+                            ...listItemStyle,
+                            padding: '12px',
+                            marginBottom: '8px'
+                        }}
+                    >
+                        <div style={{ fontWeight: 'bold' }}>{championship.title}</div>
+                        <div style={{ color: '#666' }}>
+                            {new Date(championship.date).toLocaleDateString()}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    return (
+        <div style={contentPanelStyle}>
+            <h2 style={{ margin: 0 }}>Соревнования</h2>
+
+            <div style={{
+                display: 'flex',
+                gap: '10px',
+                marginTop: '20px',
+                alignItems: 'center'
+            }}>
+                <select
+                    value={selectedSection}
+                    onChange={handleSectionChange}
+                    style={{
+                        padding: '8px',
+                        minWidth: '200px',
+                        borderRadius: '4px',
+                        border: '1px solid #ddd'
+                    }}
+                >
+                    <option value="">Все секции</option>
+                    {sections.map(section => (
+                        <option key={section.id} value={section.id}>
+                            {section.title}
+                        </option>
+                    ))}
+                </select>
+            </div>
+
+            {renderChampionshipsList()}
         </div>
     );
 };
