@@ -42,7 +42,7 @@ interface CancelableRequest {
 }
 
 
-type PageType = 'persons' | 'championships';
+type PageType = 'persons' | 'championships' | 'workouts';
 
 // Основной компонент
 const App: React.FC = () => {
@@ -149,6 +149,100 @@ const App: React.FC = () => {
         }
     };
 
+    const onSearchTrainer = async (filters: {
+        group: string;
+        startDate: string;
+        endDate: string;
+    }) => {
+        cancelAllRequests();
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            // Определяем endpoint в зависимости от роли
+            let endpoint = '/trainers/workout-filter';
+
+            // Формируем query параметры
+            const params = new URLSearchParams();
+
+            // Основные параметры
+            if (filters.group) params.append('group', filters.group);
+            if (filters.startDate) params.append('from_date', filters.startDate);
+            if (filters.endDate) params.append('to_date', filters.endDate);
+
+
+            // Отправляем запрос
+            const response = await axios.get<PersonsList>(`http://localhost:8080${endpoint}?${params.toString()}`, {
+                signal: controller.signal
+            });
+
+            // Обрабатываем ответ
+            if (!Array.isArray(response.data.persons)) {
+                throw new Error('Некорректный формат данных');
+            }
+
+            return response.data.persons;
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                setError('Ошибка при выполнении поиска');
+                console.error('Ошибка поиска:', err);
+            }
+            return [];
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const onCalculateStrain = async (filters: {
+        trainerId: string;
+        startDate: string;
+        endDate: string;
+    }) => {
+        cancelAllRequests();
+        try {
+            setIsLoading(true);
+            setError(null);
+
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            // Определяем endpoint в зависимости от роли
+            let endpoint = '/workouts/strain';
+
+            // Формируем query параметры
+            const params = new URLSearchParams();
+
+            // Основные параметры
+            if (filters.trainerId) params.append('trainer', filters.trainerId);
+            if (filters.startDate) params.append('from_date', filters.startDate);
+            if (filters.endDate) params.append('to_date', filters.endDate);
+
+
+            // Отправляем запрос
+            const response = await axios.get<StrainResponse>(`http://localhost:8080${endpoint}?${params.toString()}`, {
+                signal: controller.signal
+            });
+
+            return response.data;
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                setError('Ошибка при выполнении поиска');
+                console.error('Ошибка поиска:', err);
+            }
+            return null;
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+
 
     const updateSelectedSection = (value:string) => {
         setSelectedSection(value);
@@ -204,6 +298,17 @@ const App: React.FC = () => {
             cancelAllRequests={cancelAllRequests}
             trackRequest={trackRequest}
             />
+    } else if (currentPage === 'workouts') {
+        centralPanel = <TrainingsPanel
+        isLoading={isLoading}
+        error={error}
+        selectedPerson = {selectedPerson}
+        onPersonSelect = {handlePersonSelect}
+        onSearchTrainer = {onSearchTrainer}
+        onCalculateStrain = {onCalculateStrain}
+        cancelAllRequests={cancelAllRequests}
+        trackRequest={trackRequest}
+        />
     }
 
     return (
@@ -235,6 +340,7 @@ const NavigationPanel: React.FC<{
     const navItems = [
         { id: 'persons', label: 'Персоны' },
         { id: 'championships', label: 'Соревнования' },
+        { id: 'workouts', label: 'Тренировки' },
     ];
 
     return (
@@ -980,6 +1086,329 @@ const ChampionshipsPanel: React.FC<{
     );
 };
 
+
+interface Training {
+    id: number;
+    trainerName: string;
+    date: string;
+    duration: string;
+}
+
+interface StrainItem {
+    type: string;
+    duration: string;
+}
+
+interface StrainResponse {
+    page: number;
+    total: number;
+    strainList: StrainItem[];
+}
+
+const TrainingsPanel: React.FC<{
+    isLoading: boolean;
+    error: string | null;
+    selectedPerson: PersonShort | null;
+    onPersonSelect: (person: PersonShort) => void;
+    onSearchTrainer: (filters: {
+        group: string;
+        startDate: string;
+        endDate: string;
+    }) => Promise<PersonShort[]>;
+    onCalculateStrain: (filters: {
+        trainerId: string;
+        startDate: string;
+        endDate: string;
+    }) => Promise<StrainResponse | null>;
+    cancelAllRequests: () => void;
+    trackRequest: (request: CancelableRequest) => CancelableRequest;
+}> = ({
+          isLoading,
+          error,
+          selectedPerson,
+          onPersonSelect,
+          onSearchTrainer,
+          onCalculateStrain,
+          cancelAllRequests,
+          trackRequest
+      }) => {
+    const [mode, setMode] = useState<'trainer' | 'strain'>('trainer');
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [trainings, setTrainings] = useState<PersonShort[]>([]);
+    const [strainData, setStrainData] = useState<StrainItem[]>([]);
+
+    // Фильтры для режима тренера
+    const [trainerFilters, setTrainerFilters] = useState({
+        group: '',
+        startDate: '',
+        endDate: ''
+    });
+
+    // Фильтры для режима нагрузки
+    const [strainFilters, setStrainFilters] = useState({
+        trainerId: '',
+        startDate: '',
+        endDate: ''
+    });
+
+    // Загрузка групп
+    const loadGroups = async () => {
+        cancelAllRequests();
+        try {
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            const response = await axios.get<Group[]>(
+                'http://localhost:8080/groups/list',
+                { signal: controller.signal }
+            );
+            setGroups(response.data);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка загрузки групп:', err);
+            }
+        }
+    };
+
+    // Поиск тренеров
+    const handleTrainerSearch = async () => {
+        if (!trainerFilters.group || !trainerFilters.startDate || !trainerFilters.endDate) {
+            return;
+        }
+
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            const result = await onSearchTrainer({
+                group: trainerFilters.group,
+                startDate: trainerFilters.startDate,
+                endDate: trainerFilters.endDate
+            });
+            setTrainings(result);
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка поиска тренеров:', err);
+            }
+        }
+    };
+
+    // Расчет нагрузки
+    const handleStrainCalculate = async () => {
+        if (!strainFilters.trainerId || !strainFilters.startDate || !strainFilters.endDate) {
+            return;
+        }
+
+        try {
+            cancelAllRequests();
+            const controller = new AbortController();
+            trackRequest({
+                abort: () => controller.abort()
+            });
+
+            const result = await onCalculateStrain({
+                trainerId: strainFilters.trainerId,
+                startDate: strainFilters.startDate,
+                endDate: strainFilters.endDate
+            });
+            if (result === null) {
+                setStrainData([])
+            } else {
+                setStrainData(result.strainList);
+            }
+        } catch (err) {
+            if (!axios.isCancel(err)) {
+                console.error('Ошибка расчета нагрузки:', err);
+            }
+        }
+    };
+
+    useEffect(() => {
+        loadGroups();
+    }, []);
+
+    const renderTrainerFilter = () => (
+        <div style={{ marginTop: '15px', padding: '15px', border: '1px solid #eee', borderRadius: '5px' }}>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                <select
+                    value={trainerFilters.group}
+                    onChange={(e) => setTrainerFilters({...trainerFilters, group: e.target.value})}
+                    style={{ padding: '8px', minWidth: '200px' }}
+                >
+                    <option value="">Выберите группу</option>
+                    {groups.map(group => (
+                        <option key={group.id} value={group.group_number}>{group.group_number}</option>
+                    ))}
+                </select>
+
+                <input
+                    type="date"
+                    value={trainerFilters.startDate}
+                    onChange={(e) => setTrainerFilters({...trainerFilters, startDate: e.target.value})}
+                    style={{ padding: '8px' }}
+                    placeholder="Начало периода"
+                />
+
+                <input
+                    type="date"
+                    value={trainerFilters.endDate}
+                    onChange={(e) => setTrainerFilters({...trainerFilters, endDate: e.target.value})}
+                    style={{ padding: '8px' }}
+                    placeholder="Конец периода"
+                />
+            </div>
+
+            <button
+                onClick={handleTrainerSearch}
+                style={{ marginTop: '10px', padding: '8px 16px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px' }}
+            >
+                Найти тренеров
+            </button>
+        </div>
+    );
+
+    const renderStrainCalculator = () => (
+        <div style={{ marginTop: '15px', padding: '15px', border: '1px solid #eee', borderRadius: '5px' }}>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                <input
+                    type="text"
+                    value={strainFilters.trainerId}
+                    onChange={(e) => setStrainFilters({...strainFilters, trainerId: e.target.value})}
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID тренера"
+                />
+
+                <input
+                    type="date"
+                    value={strainFilters.startDate}
+                    onChange={(e) => setStrainFilters({...strainFilters, startDate: e.target.value})}
+                    style={{ padding: '8px' }}
+                    placeholder="Начало периода"
+                />
+
+                <input
+                    type="date"
+                    value={strainFilters.endDate}
+                    onChange={(e) => setStrainFilters({...strainFilters, endDate: e.target.value})}
+                    style={{ padding: '8px' }}
+                    placeholder="Конец периода"
+                />
+            </div>
+
+            <button
+                onClick={handleStrainCalculate}
+                style={{ marginTop: '10px', padding: '8px 16px', backgroundColor: '#4CAF50', color: 'white', border: 'none', borderRadius: '4px' }}
+            >
+                Рассчитать нагрузку
+            </button>
+        </div>
+    );
+
+    const renderTrainersList = () => {
+        if (isLoading && trainings.length === 0) {
+            return <div style={messageStyle}>Загрузка...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        if (trainings.length === 0) {
+            return <div style={messageStyle}>Тренеры не найдены</div>;
+        }
+
+        return (
+            <div style={listContainerStyle}>
+                {trainings.map(trainer => (
+                    <button
+                        key={trainer.id}
+                        onClick={() => onPersonSelect(trainer)}
+                        style={{
+                            ...listItemStyle,
+                            backgroundColor: selectedPerson?.id === trainer.id ? '#e0e0e0' : 'white',
+                        }}
+                    >
+                        {`${trainer.surname} ${trainer.name} ${trainer.patronymic}`}
+                    </button>
+                ))}
+            </div>
+        );
+    };
+
+    const renderStrainList = () => {
+        if (isLoading && strainData.length === 0) {
+            return <div style={messageStyle}>Загрузка...</div>;
+        }
+
+        if (error) {
+            return <div style={{ ...messageStyle, color: 'red' }}>{error}</div>;
+        }
+
+        if (strainData.length === 0) {
+            return <div style={messageStyle}>Данные по нагрузке отсутствуют</div>;
+        }
+
+        return (
+            <div style={listContainerStyle}>
+                {strainData.map((item, index) => (
+                    <div
+                        key={index}
+                        style={{
+                            ...listItemStyle,
+                            padding: '12px',
+                            marginBottom: '8px'
+                        }}
+                    >
+                        <div style={{ fontWeight: 'bold' }}>{item.type}</div>
+                        <div style={{ color: '#666' }}>Длительность: {item.duration}</div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    return (
+        <div style={contentPanelStyle}>
+            <h2 style={{ margin: 0 }}>Тренировки</h2>
+
+            <div style={{ marginTop: '20px', display: 'flex', gap: '10px' }}>
+                <button
+                    onClick={() => setMode('trainer')}
+                    style={{
+                        padding: '8px 16px',
+                        backgroundColor: mode === 'trainer' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'trainer' ? 'white' : 'black',
+                        border: 'none',
+                        borderRadius: '4px'
+                    }}
+                >
+                    Фильтр тренеров
+                </button>
+                <button
+                    onClick={() => setMode('strain')}
+                    style={{
+                        padding: '8px 16px',
+                        backgroundColor: mode === 'strain' ? '#4CAF50' : '#f0f0f0',
+                        color: mode === 'strain' ? 'white' : 'black',
+                        border: 'none',
+                        borderRadius: '4px'
+                    }}
+                >
+                    Калькулятор нагрузки
+                </button>
+            </div>
+
+            {mode === 'trainer' ? renderTrainerFilter() : renderStrainCalculator()}
+
+            {mode === 'trainer' ? renderTrainersList() : renderStrainList()}
+        </div>
+    );
+};
 
 const appStyle: CSSProperties = {
     display: 'flex',
