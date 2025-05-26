@@ -8,7 +8,7 @@ import axios from 'axios';
 interface PersonsList {
     page: number;
     total: number;
-    persons: PersonShort[];
+    persons: PersonShort[] | null;
 }
 
 interface ChampionshipsList {
@@ -1461,13 +1461,10 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
         'tourists-completed'
     >('tourists-routes');
 
-    // Данные для фильтров
-    const [toursList, setToursList] = useState<number[]>([]);
-    const [routesList, setRoutesList] = useState<number[]>([]);
-    const [placesList, setPlacesList] = useState<number[]>([]);
+    // Данные для фильтро
     const [routeTypes, setRouteTypes] = useState<RouteType[]>([]);
-    const [sections, setSections] = useState<string[]>([]);
-    const [groups, setGroups] = useState<string[]>([]);
+    const [sections, setSections] = useState<Section[]>([]);
+    const [groups, setGroups] = useState<Group[]>([]);
 
     // Фильтры для разных режимов
     const [touristsRoutesFilters, setTouristsRoutesFilters] = useState({
@@ -1532,18 +1529,12 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 const controller = new AbortController();
                 trackRequest({ abort: () => controller.abort() });
 
-                const [toursRes, routesRes, placesRes, typesRes, sectionsRes, groupsRes] = await Promise.all([
-                    axios.get<number[]>('http://localhost:8080/tours/list', { signal: controller.signal }),
-                    axios.get<number[]>('http://localhost:8080/routes/list', { signal: controller.signal }),
-                    axios.get<number[]>('http://localhost:8080/places/list', { signal: controller.signal }),
+                const [typesRes, sectionsRes, groupsRes] = await Promise.all([
                     axios.get<RouteType[]>('http://localhost:8080/routes/types', { signal: controller.signal }),
-                    axios.get<string[]>('http://localhost:8080/sections/list', { signal: controller.signal }),
-                    axios.get<string[]>('http://localhost:8080/groups/list', { signal: controller.signal })
+                    axios.get<Section[]>('http://localhost:8080/sections/list', { signal: controller.signal }),
+                    axios.get<Group[]>('http://localhost:8080/groups/list', { signal: controller.signal })
                 ]);
 
-                setToursList(toursRes.data);
-                setRoutesList(routesRes.data);
-                setPlacesList(placesRes.data);
                 setRouteTypes(typesRes.data);
                 setSections(sectionsRes.data);
                 setGroups(groupsRes.data);
@@ -1573,12 +1564,20 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
             if (touristsRoutesFilters.routeId) params.append('route_id', touristsRoutesFilters.routeId);
             if (touristsRoutesFilters.placeId) params.append('place_id', touristsRoutesFilters.placeId);
 
-            const response = await axios.get<PersonShort[]>(
+            const response = await axios.get<PersonsList | null>(
                 `http://localhost:8080/tourists/tour-filter?${params.toString()}`,
                 { signal: controller.signal }
             );
+            if (response?.data?.persons === null) {
+                console.log("is null")
+                setPersons([]);
+            } else {
+                console.log(response.data);
+                // @ts-ignore
+                setPersons(response?.data?.persons);
+            }
 
-            setPersons(response.data);
+
         } catch (err) {
             if (!axios.isCancel(err)) {
                 console.error('Ошибка поиска туристов:', err);
@@ -1599,12 +1598,15 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
             if (routesGroupsFilters.instructor) params.append('instructor', routesGroupsFilters.instructor);
             params.append('group_cnt', routesGroupsFilters.groupCnt.toString());
 
-            const response = await axios.get<{ routeIds: number[] }>(
+            const response = await axios.get<{ routeIds: number[] | null }>(
                 `http://localhost:8080/routes/filter?${params.toString()}`,
                 { signal: controller.signal }
             );
-
-            setRouteIds(response.data.routeIds);
+            if (response.data.routeIds === null) {
+                setRouteIds([]);
+            } else {
+                setRouteIds(response.data.routeIds);
+            }
         } catch (err) {
             if (!axios.isCancel(err)) {
                 console.error('Ошибка поиска маршрутов:', err);
@@ -1623,12 +1625,16 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
             params.append('length', routesGeoFilters.length.toString());
             params.append('difficulty', routesGeoFilters.difficulty);
 
-            const response = await axios.get<{ routeIds: number[] }>(
+            const response = await axios.get<{ routeIds: number[] | null}>(
                 `http://localhost:8080/routes/geofilter?${params.toString()}`,
                 { signal: controller.signal }
             );
+            if (response.data.routeIds === null) {
+                setRouteIds([]);
+            } else {
+                setRouteIds(response.data.routeIds);
+            }
 
-            setRouteIds(response.data.routeIds);
         } catch (err) {
             if (!axios.isCancel(err)) {
                 console.error('Ошибка геопоиска маршрутов:', err);
@@ -1646,12 +1652,18 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
             if (touristsTypesFilters.typeId) params.append('type_id', touristsTypesFilters.typeId);
             params.append('difficulty', touristsTypesFilters.difficulty);
 
-            const response = await axios.get<PersonShort[]>(
+            const response = await axios.get<PersonsList>(
                 `http://localhost:8080/tourists/route-filter?${params.toString()}`,
                 { signal: controller.signal }
             );
-
-            setPersons(response.data);
+            if (response?.data?.persons === null) {
+                console.log("is null")
+                setPersons([]);
+            } else {
+                console.log(response.data);
+                // @ts-ignore
+                setPersons(response?.data?.persons);
+            }
         } catch (err) {
             if (!axios.isCancel(err)) {
                 console.error('Ошибка поиска по типам:', err);
@@ -1673,12 +1685,15 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
             if (instructorsFilters.tourId) params.append('tour_id', instructorsFilters.tourId);
             if (instructorsFilters.placeId) params.append('place_id', instructorsFilters.placeId);
 
-            const response = await axios.get<PersonShort[]>(
+            const response = await axios.get<PersonsList>(
                 `http://localhost:8080/instructors/filter?${params.toString()}`,
                 { signal: controller.signal }
             );
-
-            setPersons(response.data);
+            if (response.data.persons === null) {
+                setPersons([]);
+            } else {
+                setPersons(response.data.persons);
+            }
         } catch (err) {
             if (!axios.isCancel(err)) {
                 console.error('Ошибка поиска инструкторов:', err);
@@ -1696,12 +1711,15 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
             if (touristsInstructorsFilters.section) params.append('section', touristsInstructorsFilters.section);
             if (touristsInstructorsFilters.group) params.append('group', touristsInstructorsFilters.group);
 
-            const response = await axios.get<PersonShort[]>(
+            const response = await axios.get<PersonsList>(
                 `http://localhost:8080/tourists/trainer-instructor?${params.toString()}`,
                 { signal: controller.signal }
             );
-
-            setPersons(response.data);
+            if (response.data.persons === null) {
+                setPersons([]);
+            } else {
+                setPersons(response.data.persons);
+            }
         } catch (err) {
             if (!axios.isCancel(err)) {
                 console.error('Ошибка поиска туристов-инструкторов:', err);
@@ -1720,25 +1738,31 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 if (touristsCompletedFilters.section) params.append('section', touristsCompletedFilters.section);
                 if (touristsCompletedFilters.group) params.append('group', touristsCompletedFilters.group);
 
-                const response = await axios.get<PersonShort[]>(
+                const response = await axios.get<PersonsList>(
                     `http://localhost:8080/tourists/completed-all?${params.toString()}`,
                     { signal: controller.signal }
                 );
-
-                setPersons(response.data);
+                if (response.data.persons === null) {
+                    setPersons([]);
+                } else {
+                    setPersons(response.data.persons);
+                }
             } else {
                 const routeIdsArray = touristsCompletedFilters.routeIds
                     .split(',')
                     .map(id => parseInt(id.trim()))
                     .filter(id => !isNaN(id));
 
-                const response = await axios.post<PersonShort[]>(
+                const response = await axios.post<PersonsList>(
                     `http://localhost:8080/tourists/completed?section=${touristsCompletedFilters.section}&group=${touristsCompletedFilters.group}`,
                     routeIdsArray,
                     { signal: controller.signal }
                 );
-
-                setPersons(response.data);
+                if (response.data.persons === null) {
+                    setPersons([]);
+                } else {
+                    setPersons(response.data.persons);
+                }
             }
         } catch (err) {
             if (!axios.isCancel(err)) {
@@ -1758,7 +1782,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите секцию</option>
                     {sections.map(section => (
-                        <option key={section} value={section}>{section}</option>
+                        <option key={section.id} value={section.id}>{section.title}</option>
                     ))}
                 </select>
 
@@ -1769,7 +1793,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите группу</option>
                     {groups.map(group => (
-                        <option key={group} value={group}>{group}</option>
+                        <option key={group.id} value={group.id}>{group.group_number}</option>
                     ))}
                 </select>
             </div>
@@ -1784,16 +1808,13 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                     placeholder="Число маршрутов"
                 />
 
-                <select
+                <input
+                    type="text"
                     value={touristsRoutesFilters.tourId}
                     onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, tourId: e.target.value})}
-                    style={selectStyle}
-                >
-                    <option value="">Выберите тур</option>
-                    {toursList.map(tourId => (
-                        <option key={tourId} value={tourId.toString()}>{tourId}</option>
-                    ))}
-                </select>
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID тура "
+                />
             </div>
 
             <div style={filterRowStyle}>
@@ -1805,29 +1826,23 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                     placeholder="Дата маршрута"
                 />
 
-                <select
+                <input
+                    type="text"
                     value={touristsRoutesFilters.routeId}
                     onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, routeId: e.target.value})}
-                    style={selectStyle}
-                >
-                    <option value="">Выберите маршрут</option>
-                    {routesList.map(routeId => (
-                        <option key={routeId} value={routeId.toString()}>{routeId}</option>
-                    ))}
-                </select>
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID маршрута "
+                />
             </div>
 
             <div style={filterRowStyle}>
-                <select
+                <input
+                    type="text"
                     value={touristsRoutesFilters.placeId}
                     onChange={(e) => setTouristsRoutesFilters({...touristsRoutesFilters, placeId: e.target.value})}
-                    style={selectStyle}
-                >
-                    <option value="">Выберите место</option>
-                    {placesList.map(placeId => (
-                        <option key={placeId} value={placeId.toString()}>{placeId}</option>
-                    ))}
-                </select>
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID места "
+                />
             </div>
 
             <button onClick={handleTouristsRoutesSearch} style={buttonStyle}>
@@ -1846,7 +1861,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите секцию</option>
                     {sections.map(section => (
-                        <option key={section} value={section}>{section}</option>
+                        <option key={section.id} value={section.id}>{section.title}</option>
                     ))}
                 </select>
 
@@ -1895,16 +1910,13 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
     const renderRoutesGeoFilter = () => (
         <div style={filterContainerStyle}>
             <div style={filterRowStyle}>
-                <select
+                <input
+                    type="text"
                     value={routesGeoFilters.place}
                     onChange={(e) => setRoutesGeoFilters({...routesGeoFilters, place: e.target.value})}
-                    style={selectStyle}
-                >
-                    <option value="">Выберите место</option>
-                    {placesList.map(placeId => (
-                        <option key={placeId} value={placeId.toString()}>{placeId}</option>
-                    ))}
-                </select>
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID места "
+                />
 
                 <input
                     type="number"
@@ -2007,29 +2019,25 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                     placeholder="Число туров"
                 />
 
-                <select
+
+                <input
+                    type="text"
                     value={instructorsFilters.tourId}
                     onChange={(e) => setInstructorsFilters({...instructorsFilters, tourId: e.target.value})}
-                    style={selectStyle}
-                >
-                    <option value="">Выберите тур</option>
-                    {toursList.map(tourId => (
-                        <option key={tourId} value={tourId.toString()}>{tourId}</option>
-                    ))}
-                </select>
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID тура "
+                />
+
             </div>
 
             <div style={filterRowStyle}>
-                <select
+                <input
+                    type="text"
                     value={instructorsFilters.placeId}
                     onChange={(e) => setInstructorsFilters({...instructorsFilters, placeId: e.target.value})}
-                    style={selectStyle}
-                >
-                    <option value="">Выберите место</option>
-                    {placesList.map(placeId => (
-                        <option key={placeId} value={placeId.toString()}>{placeId}</option>
-                    ))}
-                </select>
+                    style={{ padding: '8px', minWidth: '200px' }}
+                    placeholder="ID места "
+                />
             </div>
 
             <button onClick={handleInstructorsSearch} style={buttonStyle}>
@@ -2048,7 +2056,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите секцию</option>
                     {sections.map(section => (
-                        <option key={section} value={section}>{section}</option>
+                        <option key={section.id} value={section.id}>{section.title}</option>
                     ))}
                 </select>
 
@@ -2059,7 +2067,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите группу</option>
                     {groups.map(group => (
-                        <option key={group} value={group}>{group}</option>
+                        <option key={group.id} value={group.id}>{group.group_number}</option>
                     ))}
                 </select>
             </div>
@@ -2096,7 +2104,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите секцию</option>
                     {sections.map(section => (
-                        <option key={section} value={section}>{section}</option>
+                        <option key={section.id} value={section.id}>{section.title}</option>
                     ))}
                 </select>
 
@@ -2108,7 +2116,7 @@ const ToursPanel: React.FC<ToursPanelProps> = ({
                 >
                     <option value="">Выберите группу</option>
                     {groups.map(group => (
-                        <option key={group} value={group}>{group}</option>
+                        <option key={group.id} value={group.id}>{group.group_number}</option>
                     ))}
                 </select>
             </div>
